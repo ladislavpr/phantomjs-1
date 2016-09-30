@@ -64,7 +64,7 @@ kew.resolve(true)
   .then(tryPhantomjsInLib)
   .then(tryPhantomjsOnPath)
   .then(downloadPhantomjs)
-  .then(extractDownload)
+  //.then(extractDownload)
   .then(function (extractedPath) {
     return copyIntoPlace(extractedPath, pkgPath)
   })
