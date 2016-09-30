@@ -75,7 +75,7 @@ kew.resolve(true)
 
     try {
       // Ensure executable is executable by all users
-      fs.chmodSync(location, '755')
+      //fs.chmodSync(location, '755')
     } catch (err) {
       if (err.code == 'ENOENT') {
         console.error('chmod failed: phantomjs was not successfully copied to', location)
@@ -272,7 +272,7 @@ function extractDownload(filePath) {
   // Make double sure we have 0777 permissions; some operating systems
   // default umask does not allow write by default.
   fs.chmodSync(extractedPath, '0777')
-
+  /*
   if (filePath.substr(-4) === '.zip') {
     console.log('Extracting zip contents')
     extractZip(path.resolve(filePath), {dir: extractedPath}, function(err) {
@@ -295,6 +295,10 @@ function extractDownload(filePath) {
       }
     })
   }
+  */
+   mv(path.resolve(filePath), extractedPath + filePath.split('/').pop(), function() {
+    deferred.resolve(extractedPath)
+   });
   return deferred.promise
 }
 
@@ -303,13 +307,11 @@ function copyIntoPlace(extractedPath, targetPath) {
   console.log('Removing', targetPath)
   return kew.nfcall(fs.remove, targetPath).then(function () {
     // Look for the extracted directory, so we can rename it.
-    var files = fs.readdirSync(extractedPath)
-    for (var i = 0; i < files.length; i++) {
-      var file = path.join(extractedPath, files[i])
-      if (fs.statSync(file).isDirectory() && file.indexOf(helper.version) != -1) {
-        console.log('Copying extracted folder', file, '->', targetPath)
-        return kew.nfcall(fs.move, file, targetPath)
-      }
+    
+    var file = extractedPath;
+    if (fs.statSync(file).isDirectory()  != -1) {
+      console.log('Copying extracted folder', file, '->', targetPath)
+      return kew.nfcall(fs.move, file, targetPath)
     }
 
     console.log('Could not find extracted file', files)
