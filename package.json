@@ -1,6 +1,6 @@
 {
   "name": "phantomjs-prebuilt",
-  "version": "2.1.12",
+  "version": "2.2.0-development",
   "keywords": [
     "phantomjs",
     "headless",
@@ -53,6 +53,7 @@
   "devDependencies": {
     "eslint": "2.7.0",
     "nodeunit": "0.9.1",
+    "shelljs": "^0.7.4",
     "webdriverio": "~4.2.3"
   }
 }

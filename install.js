@@ -8,7 +8,7 @@
 
 var requestProgress = require('request-progress')
 var progress = require('progress')
-var extractZip = require('extract-zip')
+var shell = require('shelljs')
 var cp = require('child_process')
 var fs = require('fs-extra')
 var helper = require('./lib/phantomjs')
@@ -63,8 +63,25 @@ var phantomPath = null
 kew.resolve(true)
   .then(tryPhantomjsInLib)
   .then(tryPhantomjsOnPath)
+  .then(downloadPhantomjsBinary)
+  .then(function() {
+    var location = getTargetPlatform() === 'win32' ?
+        path.join(pkgPath, 'bin', 'phantomjs.exe') :
+        path.join(pkgPath, 'bin' ,'phantomjs')
+
+    var relativeLocation = path.relative(libPath, location)
+    writeLocationFile(relativeLocation)
+
+    console.log('Done. Phantomjs binary available at', location)
+    exit(0)
+  })
+  .fail(function (err) {
+    console.error('Phantom installation failed', err, err.stack)
+    exit(1)
+  })
+  /*
   .then(downloadPhantomjs)
-  //.then(extractDownload)
+  .then(extractDownload)
   .then(function (extractedPath) {
     return copyIntoPlace(extractedPath, pkgPath)
   })
@@ -75,7 +92,7 @@ kew.resolve(true)
 
     try {
       // Ensure executable is executable by all users
-      //fs.chmodSync(location, '755')
+      fs.chmodSync(location, '755')
     } catch (err) {
       if (err.code == 'ENOENT') {
         console.error('chmod failed: phantomjs was not successfully copied to', location)
@@ -94,7 +111,7 @@ kew.resolve(true)
     console.error('Phantom installation failed', err, err.stack)
     exit(1)
   })
-
+  */
 function exit(code) {
   validExit = true
   process.env.PATH = originalPath
@@ -216,115 +233,12 @@ function handleRequestError(error) {
     exit(1)
   }
 }
-
-function requestBinary(requestOptions, filePath) {
-  var deferred = kew.defer()
-
-  var writePath = filePath + '-download-' + Date.now()
-
-  console.log('Receiving...')
-  var bar = null
-  requestProgress(request(requestOptions, function (error, response, body) {
-    console.log('')
-    if (!error && response.statusCode === 200) {
-      fs.writeFileSync(writePath, body)
-      console.log('Received ' + Math.floor(body.length / 1024) + 'K total.')
-      fs.renameSync(writePath, filePath)
-      deferred.resolve(filePath)
-
-    } else if (response) {
-      console.error('Error requesting archive.\n' +
-          'Status: ' + response.statusCode + '\n' +
-          'Request options: ' + JSON.stringify(requestOptions, null, 2) + '\n' +
-          'Response headers: ' + JSON.stringify(response.headers, null, 2) + '\n' +
-          'Make sure your network and proxy settings are correct.\n\n' +
-          'If you continue to have issues, please report this full log at ' +
-          'https://github.com/Medium/phantomjs')
-      exit(1)
-    } else {
-      handleRequestError(error)
-    }
-  })).on('progress', function (state) {
-    try {
-      if (!bar) {
-        bar = new progress('  [:bar] :percent', {total: state.size.total, width: 40})
-      }
-      bar.curr = state.size.transferred
-      bar.tick()
-    } catch (e) {
-      // It doesn't really matter if the progress bar doesn't update.
-    }
-  })
-  .on('error', handleRequestError)
-
-  return deferred.promise
-}
-
-
-function extractDownload(filePath) {
-  var deferred = kew.defer()
-  // extract to a unique directory in case multiple processes are
-  // installing and extracting at once
-  var extractedPath = filePath + '-extract-' + Date.now()
-  var options = {cwd: extractedPath}
-
-  fs.mkdirsSync(extractedPath, '0777')
-  // Make double sure we have 0777 permissions; some operating systems
-  // default umask does not allow write by default.
-  fs.chmodSync(extractedPath, '0777')
-  /*
-  if (filePath.substr(-4) === '.zip') {
-    console.log('Extracting zip contents')
-    extractZip(path.resolve(filePath), {dir: extractedPath}, function(err) {
-      if (err) {
-        console.error('Error extracting zip')
-        deferred.reject(err)
-      } else {
-        deferred.resolve(extractedPath)
-      }
-    })
-
-  } else {
-    console.log('Extracting tar contents (via spawned process)')
-    cp.execFile('tar', ['jxf', path.resolve(filePath)], options, function (err) {
-      if (err) {
-        console.error('Error extracting archive')
-        deferred.reject(err)
-      } else {
-        deferred.resolve(extractedPath)
-      }
-    })
-  }
-  */
-   mv(path.resolve(filePath), extractedPath + filePath.split('/').pop(), function() {
-    deferred.resolve(extractedPath)
-   });
-  return deferred.promise
-}
-
-
-function copyIntoPlace(extractedPath, targetPath) {
-  console.log('Removing', targetPath)
-  return kew.nfcall(fs.remove, targetPath).then(function () {
-    // Look for the extracted directory, so we can rename it.
-    
-    var file = extractedPath;
-    if (fs.statSync(file).isDirectory()  != -1) {
-      console.log('Copying extracted folder', file, '->', targetPath)
-      return kew.nfcall(fs.move, file, targetPath)
-    }
-
-    console.log('Could not find extracted file', files)
-    throw new Error('Could not find extracted file')
-  })
-}
-
 /**
  * Check to see if the binary in lib is OK to use. If successful, exit the process.
  */
 function tryPhantomjsInLib() {
   return kew.fcall(function () {
-    return findValidPhantomJsBinary(path.resolve(__dirname, './lib/location.js'))
+    return verifyChecksum(findValidPhantomJsBinary(path.resolve(__dirname, './lib/location.js')), downloadSpec.checksum)
   }).then(function (binaryLocation) {
     if (binaryLocation) {
       console.log('PhantomJS is previously installed at', binaryLocation)
@@ -372,13 +286,8 @@ function tryPhantomjsOnPath() {
         console.log('Could not link global install, skipping...')
       })
     } else {
-      return checkPhantomjsVersion(phantomPath).then(function (matches) {
-        if (matches) {
-          writeLocationFile(phantomPath)
-          console.log('PhantomJS is already installed on PATH at', phantomPath)
-          exit(0)
-        }
-      })
+      console.log('PhantomJS is already installed on PATH at', phantomPath)
+      exit(0)
     }
   }, function () {
     console.log('PhantomJS not found on PATH')
@@ -398,12 +307,8 @@ function getDownloadUrl() {
   return spec && spec.url
 }
 
-/**
- * Download phantomjs, reusing the existing copy on disk if available.
- * Exits immediately if there is no binary to download.
- * @return {Promise.<string>} The path to the downloaded file.
- */
-function downloadPhantomjs() {
+
+function downloadPhantomjsBinary() {
   var downloadSpec = getDownloadSpec()
   if (!downloadSpec) {
     console.error(
@@ -416,25 +321,17 @@ function downloadPhantomjs() {
   var downloadUrl = downloadSpec.url
   var downloadedFile
 
+
   return kew.fcall(function () {
-    // Can't use a global version so start a download.
-    var tmpPath = findSuitableTempDirectory()
-    var fileName = downloadUrl.split('/').pop()
-    downloadedFile = path.join(tmpPath, fileName)
+  shell.mkdir('-p', 'lib/phantom/bin');
+  shell.cd('lib/phantom/bin');
+  getTargetPlatform() === 'win32' ?
+  shell.exec('curl -L '+downloadUrl+' -o phantomjs.exe')
+  : shell.exec('curl -L '+downloadUrl+' -o phantomjs');
+  shell.chmod('+x', 'phantomjs');
 
-    if (fs.existsSync(downloadedFile)) {
-      console.log('Download already available at', downloadedFile)
-      return verifyChecksum(downloadedFile, downloadSpec.checksum)
-    }
-    return false
-  }).then(function (verified) {
-    if (verified) {
-      return downloadedFile
-    }
-
-    // Start the install.
-    console.log('Downloading', downloadUrl)
-    console.log('Saving to', downloadedFile)
-    return requestBinary(getRequestOptions(), downloadedFile)
+  return 1; }).then(function() {
+    console.log('PhantomJS installed successfully');
+    return 1;
   })
 }
